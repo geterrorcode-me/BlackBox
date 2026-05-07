@@ -54,8 +54,10 @@ jobs:
               compileSdkVersion = 34
               minSdkVersion = 21
               targetSdkVersion = 34
+              buildToolsVersion = "34.0.0"
               versionCode = 1
               versionName = "1.0"
+              kotlin_version = "1.8.10"
           }
           EOF
 
@@ -92,8 +94,11 @@ jobs:
           find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.compileSdkVersion/34/g' {} +
           find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.minSdkVersion/21/g' {} +
           find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.targetSdkVersion/34/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.buildToolsVersion/"34.0.0"/g' {} +
           find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.versionCode/1/g' {} +
           find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.versionName/"1.0"/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.kotlin_version/"1.8.10"/g' {} +
+          find . -name "build.gradle" -exec sed -i '/buildToolsVersion/d' {} +
 
       - name: Inject Namespace
         run: |
@@ -129,7 +134,6 @@ jobs:
           mv classes-new.jar classes.jar
           sed -i 's/package="top.niunaijun.blackbox"/package="com.vmecha.vcore"/g' AndroidManifest.xml
           zip -r -q ../vmecha-vm.aar .
-          cd ..
 
       - name: Upload AAR
         uses: actions/upload-artifact@v4
