@@ -1,4 +1,4 @@
-name: Build BlackBox VMecha AAR - Full Fix v4
+name: Build BlackBox VMecha AAR - Full Fix v5
 on: 
   workflow_dispatch:
 
@@ -40,12 +40,12 @@ jobs:
           find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
           find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
 
-          # 2. Tambahkan Repositori Lengkap (Termasuk Maven Central & JitPack)
-          # Kita tambahkan di build.gradle root agar semua modul bisa akses
-          sed -i '/repositories {/a \        google()\n        mavenCentral()\n        maven { url "https://jitpack.io" }\n        maven { url "https://maven.aliyun.com/repository/public" }' build.gradle
+          # 2. Repositories
+          sed -i '/repositories {/a \        google()\n        mavenCentral()\n        maven { url "https://jitpack.io" }' build.gradle
 
-          # 3. Aktifkan AIDL
+          # 3. Aktifkan AIDL & CMake Project Fix
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
+          find . -name "CMakeLists.txt" -exec sed -i '/cmake_minimum_required/a project(VMechaNative)' {} +
 
           # 4. Global Namespace & Manifest Cleanup
           find . -name "AndroidManifest.xml" | while read manifest; do
@@ -58,12 +58,23 @@ jobs:
             fi
           done
 
-      - name: Fix CMake & Native Projects
+      - name: Fix AIDL Package Mismatch
         run: |
-          # Perbaiki peringatan "No project() command" di CMake
-          find . -name "CMakeLists.txt" -exec sed -i '/cmake_minimum_required/a project(VMechaNative)' {} +
+          # Masalah: AIDL compiler protes karena folder vs package tidak cocok.
+          # Kita paksa semua deklarasi package di dalam file AIDL mengikuti path foldernya.
+          find . -name "*.aidl" | while read aidl_file; do
+            # Ambil path relatif dari folder 'aidl'
+            # Contoh: top/niunaijun/blackbox/entity/location
+            relative_path=$(echo "$aidl_file" | sed -n 's|.*/aidl/||p' | xargs dirname | tr '/' '.')
+            
+            if [ -n "$relative_path" ]; then
+              # Ganti baris 'package ...;' dengan path folder yang benar
+              sed -i "s|^package .*|package $relative_path;|" "$aidl_file"
+            fi
+          done
+          echo "AIDL packages synced with folder structure."
 
-      - name: Refactor & Force Dependencies
+      - name: Refactor to VMecha
         run: |
           if [ -d "Bcore" ]; then
             cd Bcore
@@ -71,17 +82,13 @@ jobs:
             sed -i '/applicationId/d' build.gradle
             sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
             
-            # Jika Gradle masih gagal cari free_reflection, kita paksa ganti versinya ke yang lebih umum tersedia
-            sed -i "s|me.weishu:free_reflection:3.0.1|me.weishu:free_reflection:3.0.1|g" build.gradle
-            
-            # Refactor Package Strings
+            # Refactor Package Strings (Hati-hati: ini merubah deklarasi AIDL juga)
             find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
             cd ..
           fi
 
       - name: Build Bcore AAR
         run: |
-          # Gunakan --refresh-dependencies untuk memaksa Gradle mencari ulang free_reflection
           ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon --refresh-dependencies
 
       - name: Upload Result
