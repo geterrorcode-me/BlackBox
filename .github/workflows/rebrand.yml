@@ -62,8 +62,10 @@ jobs:
               versionCode = 1
               versionName = "1.0"
               kotlin_version = "1.8.10"
-              blackReflection = false
-              useAsm = false
+              // Versi fix buat BlackBox
+              blackReflection = "3.0.1"
+              asm_version = "9.2"
+              useAsm = true
               enableLSP = false
           }
           EOF
@@ -93,8 +95,11 @@ jobs:
           find . -name "build.gradle" -exec sed -i '/tasks.withType(DokkaTask)/, /}/d' {} +
           find . -name "build.gradle" -exec sed -i '/javadoc {/ , /}/d' {} +
           find . -name "build.gradle" -exec sed -i '/publishing {/ , /}/d' {} +
-          # Hapus dependency jitpack yg nyasar
-          find . -name "build.gradle" -exec sed -i '/jitpack/d' {} +
+          # Hardcode BlackReflection versi biar ga "false"
+          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:$rootProject.ext.blackReflection|me.weishu:free_reflection:3.0.1|g' {} +
+          find . -name "build.gradle" -exec sed -i 's|org.ow2.asm:asm:$rootProject.ext.asm_version|org.ow2.asm:asm:9.2|g' {} +
+          # Hapus conditional yg matiin reflection
+          find . -name "build.gradle" -exec sed -i '/if (!rootProject.ext.blackReflection)/, /}/d' {} +
 
       - name: Rebrand Source Code
         run: |
