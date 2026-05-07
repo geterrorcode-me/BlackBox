@@ -42,13 +42,13 @@ jobs:
           rootProject.name = "VMecha"
           EOF
           
+          # Mencari semua direktori yang berisi build.gradle (kecuali root dan app)
           find . -name "build.gradle" -not -path "./build.gradle" -not -path "./app/build.gradle" | while read file; do
             dir=$(dirname "$file" | sed 's|^\./||')
             echo "include ':$dir'" >> settings.gradle
           done
-          sed -i 's|/:|:|g' settings.gradle
-          sed -i 's|/|🜲|g' settings.gradle
-          sed -i 's|🜲|:|g' settings.gradle
+          # Perbaikan format path ke format gradle project :path:subpath
+          sed -i 's|/|:|g' settings.gradle
 
       - name: Overwrite Root build.gradle
         run: |
@@ -66,6 +66,9 @@ jobs:
               versionCode = 1
               versionName = "1.0"
               kotlin_version = "1.8.10"
+              // Menambahkan properti yang hilang agar build tidak crash saat evaluasi
+              blackReflection = "1.1.2"
+              asm_version = "9.2"
           }
           EOF
 
@@ -85,77 +88,53 @@ jobs:
 
       - name: Clean Sub-Module Gradle
         run: |
-          find . -name "build.gradle" -not -path "./build.gradle" -not -path "./app/build.gradle" -exec sed -i '/buildscript {/,/}/d' {} +
-          find . -name "build.gradle" -not -path "./build.gradle" -not -path "./app/build.gradle" -exec sed -i '/repositories {/,/}/d' {} +
-          find . -name "build.gradle" -not -path "./build.gradle" -not -path "./app/build.gradle" -exec sed -i '/allprojects {/,/}/d' {} +
-          find . -name "build.gradle" -not -path "./app/build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
-          find . -name "build.gradle" -exec sed -i '/buildToolsVersion/d' {} +
-          find . -name "build.gradle" -exec sed -i '/tasks.withType(Javadoc)/, /}/d' {} +
-          find . -name "build.gradle" -exec sed -i '/tasks.withType(DokkaTask)/, /}/d' {} +
-          find . -name "build.gradle" -exec sed -i '/javadoc {/ , /}/d' {} +
-          find . -name "build.gradle" -exec sed -i '/publishing {/ , /}/d' {} +
-          # Replace CodingGay -> me.weishu
+          # Hapus blokir buildscript/repositories yang sering bikin konflik di sub-modul
+          find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/buildscript {/,/}/d' {} +
+          find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/repositories {/,/}/d' {} +
+          
+          # Pastikan AIDL aktif
+          find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
+          
+          # Migrasi BlackReflection ke FreeReflection milik Weishu (lebih stabil untuk Android baru)
           find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay:BlackReflection:1.1.2|me.weishu:free-reflection:3.0.1|g' {} +
-          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay:BlackReflection:compiler:1.1.2||g' {} +
-          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:$rootProject.ext.blackReflection|me.weishu:free-reflection:3.0.1|g' {} +
-          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:$blackReflection|me.weishu:free-reflection:3.0.1|g' {} +
-          find . -name "build.gradle" -exec sed -i 's|org.ow2.asm:asm:$rootProject.ext.asm_version|org.ow2.asm:asm:9.2|g' {} +
-          find . -name "build.gradle" -exec sed -i '/if (!rootProject.ext.blackReflection)/, /}/d' {} +
-          find . -name "build.gradle" -exec sed -i '/if (rootProject.ext.useAsm)/, /}/d' {} +
+          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:.*|me.weishu:free-reflection:3.0.1|g' {} +
+          find . -name "build.gradle" -exec sed -i 's|org.ow2.asm:asm:.*|org.ow2.asm:asm:9.2|g' {} +
 
       - name: Rebrand Source Code
         run: |
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\.niunaijun\.blackbox/com.vmecha.vcore/g' {} +
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g' {} +
-          find . -type d -path "*/top/niunaijun/blackbox" | while read dir; do
-            newdir=$(echo $dir | sed 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g')
-            mkdir -p $(dirname $newdir)
-            mv $dir $newdir 2>/dev/null || true
-          done
 
-      - name: Force Inject Namespace All Modules
+      - name: Force Inject Namespace
         run: |
-          find . -name "build.gradle" -not -path "./build.gradle" -not -path "./app/build.gradle" | while read gradle_file; do
+          find . -name "build.gradle" -not -path "./build.gradle" | while read gradle_file; do
             if grep -q "android {" "$gradle_file"; then
-              module_dir=$(dirname "$gradle_file")
-              manifest="$module_dir/src/main/AndroidManifest.xml"
-              
-              if [ -f "$manifest" ]; then
-                pkg=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
-                sed -i 's/package="[^"]*"//g' "$manifest"
-              fi
-              
-              if [ -z "$pkg" ]; then
-                pkg="com.vmecha.vcore.$(basename $module_dir | tr '-' '_' | tr '[:upper:]' '[:lower:]')"
-              fi
-              
+              module_name=$(basename $(dirname "$gradle_file") | tr '-' '_' | tr '[:upper:]' '[:lower:]')
+              pkg="com.vmecha.vcore.$module_name"
+              # Hapus namespace lama jika ada dan suntikkan yang baru
               sed -i '/namespace /d' "$gradle_file"
               sed -i "/android {/a \    namespace \"$pkg\"" "$gradle_file"
             fi
           done
 
-      - name: Finalize Bcore
+      - name: Finalize Bcore (Main Target)
         run: |
-          cd Bcore
-          sed -i 's/com.android.application/com.android.library/g' build.gradle
-          sed -i '/applicationId/d' build.gradle
-          sed -i '/namespace /d' build.gradle
-          sed -i "/android {/a \    namespace \"com.vmecha.vcore\"" build.gradle
+          if [ -d "Bcore" ]; then
+            cd Bcore
+            sed -i 's/com.android.application/com.android.library/g' build.gradle
+            sed -i '/applicationId/d' build.gradle
+            sed -i '/namespace /d' build.gradle
+            sed -i "/android {/a \    namespace \"com.vmecha.vcore\"" build.gradle
+          fi
 
       - name: Build Bcore AAR
-        run: ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon
+        run: ./gradlew :Bcore:assembleRelease -x lint --stacktrace
 
-      - name: Repack to com.vmecha.vcore
+      - name: Repack AAR
         run: |
-          AAR=$(find Bcore/build/outputs/aar -name "*.aar" | head -1)
-          wget -q https://repo1.maven.org/maven2/com/googlecode/jarjar/jarjar/1.4/jarjar-1.4.jar
-          rm -rf temp_aar && mkdir temp_aar && cd temp_aar
-          unzip -q ../$AAR
-          echo "rule top.niunaijun.blackbox.** com.vmecha.vcore.@1" > rules.txt
-          java -jar ../jarjar-1.4.jar process rules.txt classes.jar classes-new.jar
-          mv classes-new.jar classes.jar
-          sed -i 's/package="top.niunaijun.blackbox"/package="com.vmecha.vcore"/g' AndroidManifest.xml
-          zip -r -q ../vmecha-vm.aar .
+          AAR_PATH=$(find Bcore/build/outputs/aar -name "*release.aar" | head -1)
+          if [ -z "$AAR_PATH" ]; then echo "AAR not found!"; exit 1; fi
+          cp "$AAR_PATH" vmecha-vm.aar
 
       - name: Upload VMecha AAR
         uses: actions/upload-artifact@v4
