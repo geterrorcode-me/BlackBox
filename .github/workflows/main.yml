@@ -1,0 +1,46 @@
+name: Build BlackBox AAR
+on: 
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Bcore Module
+        run: |
+          # Di BlackBox, mesin utamanya biasanya ada di folder 'Bcore'
+          # Kita pastikan Bcore dikonfigurasi sebagai Library, bukan Application
+          cd Bcore
+          sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.library"/g' build.gradle 2>/dev/null || true
+          sed -i 's/id "com.android.application"/id "com.android.library"/g' build.gradle 2>/dev/null || true
+          
+          # Hapus applicationId karena Library tidak boleh punya ID unik
+          sed -i '/applicationId/d' build.gradle
+          
+          # Optional: Ganti package name jika ingin custom (VMecha)
+          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
+          echo "Bcore patched for AAR build."
+
+      - name: Build AAR
+        run: |
+          chmod +x gradlew
+          # Kita hanya build modul Bcore
+          ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon
+
+      - name: Upload AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmecha-blackbox-core
+          path: Bcore/build/outputs/aar/Bcore-release.aar
