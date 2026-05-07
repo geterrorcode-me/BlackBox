@@ -18,42 +18,38 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Upgrade Gradle Wrapper
-        # Kita paksa upgrade ke Gradle 8.0 karena Gradle 6.5 tidak dukung Java 17
+      - name: Clean and Patch Project
         run: |
-          gradle wrapper --gradle-version 8.0 --distribution-type all
-
-      - name: Patch Bcore for AAR
-        run: |
-          # Masuk ke folder Bcore (Core mesin BlackBox)
-          cd Bcore
+          # 1. Hapus semua referensi jcenter() yang menyebabkan crash di Gradle 9
+          find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
           
-          # Ubah plugin dari Application menjadi Library
+          # 2. Pastikan mavenCentral() dan google() ada sebagai pengganti
+          # Kita tambahkan di baris setelah 'repositories {'
+          find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()' {} +
+
+          # 3. Patch Bcore menjadi Library
+          cd Bcore
           sed -i 's/id "com.android.application"/id "com.android.library"/g' build.gradle 2>/dev/null || true
           sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.library"/g' build.gradle 2>/dev/null || true
           
-          # Hapus applicationId (wajib untuk AAR)
+          # 4. Hapus applicationId dan tambahkan namespace
           sed -i '/applicationId/d' build.gradle
-          
-          # Rename Package (Optional: Sesuaikan dengan VMecha)
-          # BlackBox aslinya pakai black.habakuk.core
-          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
-          
-          # Pastikan namespace diatur untuk Gradle 8
-          # Kita tambahkan baris namespace jika belum ada
+          # Tambahkan namespace di baris setelah 'android {'
           sed -i '/android {/a \    namespace "com.vmecha.vcore"' build.gradle
+          
+          # 5. Rename package core ke VMecha
+          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
 
       - name: Global String Replacement
         run: |
-          # Ganti semua sisa string lama di seluruh project root
           find . -maxdepth 4 -type f -not -path '*/.*' -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
 
       - name: Build Bcore AAR
         run: |
           chmod +x gradlew
-          # Kita hanya mem-build modul Bcore saja agar cepat dan bersih
+          # Kita jalankan assembleRelease untuk modul Bcore
           ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon
-
+          
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
