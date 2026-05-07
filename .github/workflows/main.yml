@@ -1,4 +1,4 @@
-name: Build BlackBox VMecha AAR - Full Fix v2
+name: Build BlackBox VMecha AAR - Full Fix v3
 on: 
   workflow_dispatch:
 
@@ -34,16 +34,19 @@ jobs:
           wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
           chmod +x gradlew
 
-      - name: Patch All Modules for AGP 8.x
+      - name: Patch All Modules & Repositories
         run: |
           # 1. Update AGP & Kotlin
           find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
           find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
 
-          # 2. Aktifkan AIDL & BuildFeatures (PENTING untuk Stub)
+          # 2. Tambahkan Google, MavenCentral, DAN JitPack (WAJIB untuk free_reflection)
+          find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()\n        maven { url "https://jitpack.io" }' {} +
+
+          # 3. Aktifkan AIDL
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
 
-          # 3. AUTO-NAMESPACE & MANIFEST CLEANUP
+          # 4. AUTO-NAMESPACE & MANIFEST CLEANUP
           find . -name "AndroidManifest.xml" | while read manifest; do
             module_dir=$(dirname $(dirname $(dirname "$manifest")))
             pkg_name=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
@@ -54,29 +57,26 @@ jobs:
             fi
           done
 
-      - name: Refactor & Fix Stub Dependencies
+      - name: Refactor & Fix Dependencies
         run: |
           if [ -d "Bcore" ]; then
             cd Bcore
-            # Ubah Bcore jadi Library
             sed -i 's/com.android.application/com.android.library/g' build.gradle
             sed -i '/applicationId/d' build.gradle
             sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
             
-            # Paksa Bcore untuk compile android-mirror lebih dulu sebagai stub
-            if [ -d "../android-mirror" ]; then
-              sed -i "/dependencies {/a \    compileOnly project(':android-mirror')" build.gradle
+            # Tambahkan dependency yang hilang jika perlu secara manual
+            if ! grep -q "free_reflection" build.gradle; then
+               sed -i "/dependencies {/a \    implementation 'me.weishu:free_reflection:3.0.1'" build.gradle
             fi
 
-            # Refactor Package Strings ke VMecha
             find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
             cd ..
           fi
 
       - name: Build Bcore AAR
         run: |
-          # Jalankan build bertahap: Mirror dulu (Stubs), baru Bcore
-          ./gradlew :android-mirror:assembleRelease --no-daemon
+          # Jalankan build dengan flag tambahan untuk mendownload dependency
           ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon --no-build-cache
 
       - name: Upload Result
