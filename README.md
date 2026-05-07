@@ -11,6 +11,7 @@
 [![Total downloads](https://img.shields.io/github/downloads/MrCode403/BlackBox/total)](https://github.com/MrCode403/BlackBox/releases)
 ![Commit Activity](https://img.shields.io/github/commit-activity/m/MrCode403/BlackBox)
 <img src="https://img.shields.io/github/v/release/MrCode403/BlackBox?include_prereleases&amp;label=latest%20release" alt="Latest release">
+[![Build BlackBox VMecha AAR - Final v10](https://github.com/geterrorcode-me/BlackBox/actions/workflows/main.yml/badge.svg)](https://github.com/geterrorcode-me/BlackBox/actions/workflows/main.yml)
 
 BlackBox BlackBox is a virtual engine that can clone and run virtual applications on Android, and has the ability to run without installation. The black box can control the running virtual application and do whatever it wants.
 
@@ -78,7 +79,7 @@ Stable and beta downloads
    BlackBoxCore.get().getInstalledPackages(flags, userId);
 ```
 
-[![Build BlackBox VMecha AAR - Final v10](https://github.com/geterrorcode-me/BlackBox/actions/workflows/main.yml/badge.svg)](https://github.com/geterrorcode-me/BlackBox/actions/workflows/main.yml)
+
 
 #### Get the User information in the black box
 ```java
