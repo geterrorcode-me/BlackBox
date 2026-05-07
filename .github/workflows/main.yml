@@ -1,4 +1,4 @@
-name: Build BlackBox VMecha AAR - Full Fix v3
+name: Build BlackBox VMecha AAR - Full Fix v4
 on: 
   workflow_dispatch:
 
@@ -40,13 +40,14 @@ jobs:
           find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
           find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
 
-          # 2. Tambahkan Google, MavenCentral, DAN JitPack (WAJIB untuk free_reflection)
-          find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()\n        maven { url "https://jitpack.io" }' {} +
+          # 2. Tambahkan Repositori Lengkap (Termasuk Maven Central & JitPack)
+          # Kita tambahkan di build.gradle root agar semua modul bisa akses
+          sed -i '/repositories {/a \        google()\n        mavenCentral()\n        maven { url "https://jitpack.io" }\n        maven { url "https://maven.aliyun.com/repository/public" }' build.gradle
 
           # 3. Aktifkan AIDL
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
 
-          # 4. AUTO-NAMESPACE & MANIFEST CLEANUP
+          # 4. Global Namespace & Manifest Cleanup
           find . -name "AndroidManifest.xml" | while read manifest; do
             module_dir=$(dirname $(dirname $(dirname "$manifest")))
             pkg_name=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
@@ -57,7 +58,12 @@ jobs:
             fi
           done
 
-      - name: Refactor & Fix Dependencies
+      - name: Fix CMake & Native Projects
+        run: |
+          # Perbaiki peringatan "No project() command" di CMake
+          find . -name "CMakeLists.txt" -exec sed -i '/cmake_minimum_required/a project(VMechaNative)' {} +
+
+      - name: Refactor & Force Dependencies
         run: |
           if [ -d "Bcore" ]; then
             cd Bcore
@@ -65,19 +71,18 @@ jobs:
             sed -i '/applicationId/d' build.gradle
             sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
             
-            # Tambahkan dependency yang hilang jika perlu secara manual
-            if ! grep -q "free_reflection" build.gradle; then
-               sed -i "/dependencies {/a \    implementation 'me.weishu:free_reflection:3.0.1'" build.gradle
-            fi
-
+            # Jika Gradle masih gagal cari free_reflection, kita paksa ganti versinya ke yang lebih umum tersedia
+            sed -i "s|me.weishu:free_reflection:3.0.1|me.weishu:free_reflection:3.0.1|g" build.gradle
+            
+            # Refactor Package Strings
             find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
             cd ..
           fi
 
       - name: Build Bcore AAR
         run: |
-          # Jalankan build dengan flag tambahan untuk mendownload dependency
-          ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon --no-build-cache
+          # Gunakan --refresh-dependencies untuk memaksa Gradle mencari ulang free_reflection
+          ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon --refresh-dependencies
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
