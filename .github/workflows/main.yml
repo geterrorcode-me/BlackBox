@@ -18,43 +18,53 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Pre-Clean JCenter (Required for Gradle 9+)
+      - name: Force Downgrade Wrapper (Manual Bypass)
         run: |
-          # Hapus jcenter() dari semua file gradle agar Gradle 9 tidak error saat startup
+          # Hapus jcenter agar tidak ada error saat script di-scan
           find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
           find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
-          echo "JCenter references removed."
-
-      - name: Force Wrapper to Gradle 8.0
-        run: |
-          # Sekarang Gradle 9 mau berjalan karena jcenter() sudah hilang
-          gradle wrapper --gradle-version 8.0 --distribution-type all
+          
+          # Kita tidak pakai 'gradle wrapper' bawaan sistem (v9)
+          # Kita download langsung wrapper jar versi 8.0
+          mkdir -p gradle/wrapper
+          wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+          
+          # Buat file gradle-wrapper.properties secara manual
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-all.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+          
+          # Pastikan file gradlew ada (ambil dari repo atau buat baru)
+          if [ ! -f gradlew ]; then
+            wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
+          fi
+          chmod +x gradlew
+          echo "Force downgraded to Gradle 8.0 wrapper successfully."
 
       - name: Patch Bcore for AAR
         run: |
-          # Pastikan repositori standar ada
+          # Tambahkan repo standar jika hilang
           find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()' {} +
 
           cd Bcore
-          # Ubah ke Library
+          # Ubah plugin ke library
           sed -i 's/id "com.android.application"/id "com.android.library"/g' build.gradle 2>/dev/null || true
           sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.library"/g' build.gradle 2>/dev/null || true
           
-          # Hapus applicationId dan atur Namespace
+          # Setup Namespace dan hapus ID
           sed -i '/applicationId/d' build.gradle
           sed -i '/android {/a \    namespace "com.vmecha.vcore"' build.gradle
           
-          # Rename package
+          # Refactor package
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
-
-      - name: Global String Replacement
-        run: |
-          find . -maxdepth 4 -type f -not -path '*/.*' -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
 
       - name: Build Bcore AAR
         run: |
-          chmod +x gradlew
-          # Jalankan build menggunakan wrapper 8.0 yang baru dibuat
+          # Sekarang jalankan pakai ./gradlew (8.0), BUKAN 'gradle' (9.4)
           ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon
 
       - name: Upload AAR
