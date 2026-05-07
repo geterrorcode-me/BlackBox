@@ -20,16 +20,13 @@ jobs:
 
       - name: Force Downgrade Wrapper (Manual Bypass)
         run: |
-          # Hapus jcenter agar tidak ada error saat script di-scan
+          # 1. Bersihkan jcenter()
           find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
           find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
           
-          # Kita tidak pakai 'gradle wrapper' bawaan sistem (v9)
-          # Kita download langsung wrapper jar versi 8.0
+          # 2. Setup Wrapper 8.0 manual
           mkdir -p gradle/wrapper
           wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
-          
-          # Buat file gradle-wrapper.properties secara manual
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -37,39 +34,37 @@ jobs:
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
           EOF
-          
-          # Pastikan file gradlew ada (ambil dari repo atau buat baru)
-          if [ ! -f gradlew ]; then
-            wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
-          fi
+          wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
           chmod +x gradlew
-          echo "Force downgraded to Gradle 8.0 wrapper successfully."
 
-      - name: Patch Bcore for AAR
+      - name: Patch Root and Bcore for Compatibility
         run: |
-          # Tambahkan repo standar jika hilang
+          # 3. Paksa Android Gradle Plugin ke versi 8.1.0 agar kompatibel dengan Gradle 8 & Java 17
+          # Kita cari baris classpath 'com.android.tools.build:gradle:...' dan ganti
+          find . -name "build.gradle" -exec sed -i 's/com\.android\.tools\.build:gradle:[^'\'封'\"']*/com.android.tools.build:gradle:8.1.0/g' {} +
+
+          # 4. Tambahkan repositori wajib
           find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()' {} +
 
+          # 5. Konfigurasi Bcore sebagai Library
           cd Bcore
-          # Ubah plugin ke library
           sed -i 's/id "com.android.application"/id "com.android.library"/g' build.gradle 2>/dev/null || true
           sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.library"/g' build.gradle 2>/dev/null || true
-          
-          # Setup Namespace dan hapus ID
           sed -i '/applicationId/d' build.gradle
+          
+          # 6. Setup Namespace (Wajib di AGP 8.x)
           sed -i '/android {/a \    namespace "com.vmecha.vcore"' build.gradle
           
-          # Refactor package
+          # 7. Refactor package
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
 
       - name: Build Bcore AAR
         run: |
-          # Sekarang jalankan pakai ./gradlew (8.0), BUKAN 'gradle' (9.4)
-          ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon
+          # Gunakan --no-build-cache untuk menghindari konflik sisa build sebelumnya
+          ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon --no-build-cache
 
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
           name: vmecha-blackbox-core
           path: Bcore/build/outputs/aar/*.aar
-          
