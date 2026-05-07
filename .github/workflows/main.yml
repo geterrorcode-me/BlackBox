@@ -1,4 +1,4 @@
-name: Build BlackBox VMecha AAR - Full Fix v6
+name: Build BlackBox VMecha AAR - Final
 on: 
   workflow_dispatch:
 
@@ -36,21 +36,11 @@ jobs:
 
       - name: Patch Repositories & Settings
         run: |
-          # 1. Update AGP & Kotlin
           find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
           find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
 
-          # 2. Paksa repositori ke settings.gradle (PENTING untuk Gradle 8+)
-          # Ini akan mengganti atau menambahkan repositori agar me.weishu bisa ditemukan
           if [ -f "settings.gradle" ]; then
             cat > settings.gradle.tmp << 'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
               repositories {
@@ -61,18 +51,16 @@ jobs:
               }
           }
           EOF
-            # Ambil sisa include project dari settings.gradle asli
             grep "include" settings.gradle >> settings.gradle.tmp
             mv settings.gradle.tmp settings.gradle
           fi
 
-      - name: Fix AIDL & Manifest
+      - name: Global Refactor & Fix R Symbol
         run: |
-          # 3. Aktifkan AIDL & CMake Project Fix
+          # 1. Aktifkan AIDL
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
-          find . -name "CMakeLists.txt" -exec sed -i '/cmake_minimum_required/a project(VMechaNative)' {} +
-
-          # 4. Global Namespace & Manifest Cleanup
+          
+          # 2. Namespace & Manifest Cleanup
           find . -name "AndroidManifest.xml" | while read manifest; do
             module_dir=$(dirname $(dirname $(dirname "$manifest")))
             pkg_name=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
@@ -83,7 +71,14 @@ jobs:
             fi
           done
 
-          # 5. Fix AIDL Package Mismatch (BLocationConfig fix)
+          # 3. FIX R IMPORT: Ganti semua import R lama ke namespace baru
+          # Kita cari 'top.niunaijun.blackbox.R' dan ganti ke 'com.vmecha.vcore.R'
+          find . -type f \( -name "*.java" -o -name "*.kt" \) -exec sed -i 's/top\.niunaijun\.blackbox\.R/com.vmecha.vcore.R/g' {} +
+          
+          # 4. Refactor String Package Umum
+          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
+
+          # 5. Fix AIDL Package Mismatch
           find . -name "*.aidl" | while read aidl_file; do
             relative_path=$(echo "$aidl_file" | sed -n 's|.*/aidl/||p' | xargs dirname | tr '/' '.')
             if [ -n "$relative_path" ]; then
@@ -91,25 +86,21 @@ jobs:
             fi
           done
 
-      - name: Refactor to VMecha
+      - name: Configure Bcore as Library
         run: |
           if [ -d "Bcore" ]; then
             cd Bcore
             sed -i 's/com.android.application/com.android.library/g' build.gradle
             sed -i '/applicationId/d' build.gradle
             sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
-            
-            # Refactor semua string kode
-            find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
             cd ..
           fi
 
       - name: Build Bcore AAR
         run: |
-          # Jalankan build dengan force refresh
-          ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon --refresh-dependencies
+          ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon
 
-      - name: Upload Result
+      - name: Upload VMecha AAR
         uses: actions/upload-artifact@v4
         with:
           name: vmecha-blackbox-core
