@@ -152,39 +152,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vmecha-vm-aar
-          path: vmecha-vm.aar            if [ -f "$module_dir/build.gradle" ]; then
-              pkg=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "com.vmecha.vcore.$(basename $module_dir | tr '-' '_')")
-              sed -i 's/package="[^"]*"//g' "$manifest"
-              if ! grep -q "namespace" "$module_dir/build.gradle"; then
-                sed -i "/android {/a \    namespace \"$pkg\"" "$module_dir/build.gradle"
-              fi
-            fi
-          done
-
-      - name: Finalize Bcore
-        run: |
-          cd Bcore
-          sed -i 's/com.android.application/com.android.library/g' build.gradle
-          sed -i '/applicationId/d' build.gradle
-          sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
-
-      - name: Build AAR
-        run: ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon
-
-      - name: Repack to com.vmecha.vcore
-        run: |
-          AAR=$(find Bcore/build/outputs/aar -name "*.aar" | head -1)
-          wget -q https://repo1.maven.org/maven2/com/googlecode/jarjar/jarjar/1.4/jarjar-1.4.jar
-          rm -rf temp_aar && mkdir temp_aar && cd temp_aar
-          unzip -q ../$AAR
-          echo "rule top.niunaijun.blackbox.** com.vmecha.vcore.@1" > rules.txt
-          java -jar ../jarjar-1.4.jar process rules.txt classes.jar classes-new.jar
-          mv classes-new.jar classes.jar
-          sed -i 's/package="top.niunaijun.blackbox"/package="com.vmecha.vcore"/g' AndroidManifest.xml
-          zip -r -q ../vmecha-vm.aar .
-
-      - name: Upload AAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: vmecha-vm-aar
           path: vmecha-vm.aar
