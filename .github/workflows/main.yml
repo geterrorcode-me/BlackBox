@@ -1,10 +1,3 @@
-
-      - name: Upload VMecha AAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: vmecha-blackbox-core
-          path: Bcore/build/outputs/aar/*.aar
-          
 name: Build BlackBox VMecha AAR - Final v9
 on: 
   workflow_dispatch:
