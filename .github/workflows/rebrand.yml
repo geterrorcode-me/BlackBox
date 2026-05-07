@@ -56,7 +56,6 @@ jobs:
               id 'org.jetbrains.kotlin.android' version '1.8.10' apply false
           }
           
-          // Define semua ext yg dipake BlackBox
           ext {
               compileSdkVersion = 34
               minSdkVersion = 21
@@ -89,7 +88,6 @@ jobs:
 
       - name: Clean Sub-Module Gradle
         run: |
-          # Hapus block conflict tapi JANGAN replace ext
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/buildscript {/,/}/d' {} +
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/repositories {/,/}/d' {} +
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/allprojects {/,/}/d' {} +
@@ -106,16 +104,26 @@ jobs:
             mv $dir $newdir 2>/dev/null || true
           done
 
-      - name: Inject Namespace
+      - name: Force Inject Namespace All Modules
         run: |
-          find . -name "AndroidManifest.xml" | while read manifest; do
-            module_dir=$(dirname $(dirname "$manifest"))
-            if [ -f "$module_dir/build.gradle" ]; then
-              pkg=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "com.vmecha.vcore.$(basename $module_dir | tr '-' '_')")
-              sed -i 's/package="[^"]*"//g' "$manifest"
-              if ! grep -q "namespace" "$module_dir/build.gradle"; then
-                sed -i "/android {/a \    namespace \"$pkg\"" "$module_dir/build.gradle"
+          find . -name "build.gradle" -not -path "./build.gradle" | while read gradle_file; do
+            if grep -q "android {" "$gradle_file"; then
+              module_dir=$(dirname "$gradle_file")
+              manifest="$module_dir/src/main/AndroidManifest.xml"
+              
+              if [ -f "$manifest" ]; then
+                pkg=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
+                sed -i 's/package="[^"]*"//g' "$manifest"
               fi
+              
+              if [ -z "$pkg" ]; then
+                pkg="com.vmecha.vcore.$(basename $module_dir | tr '-' '_' | tr '[:upper:]' '[:lower:]')"
+              fi
+              
+              sed -i '/namespace /d' "$gradle_file"
+              sed -i "/android {/a \    namespace \"$pkg\"" "$gradle_file"
+              
+              echo "Force namespace $pkg for $module_dir"
             fi
           done
 
@@ -124,7 +132,8 @@ jobs:
           cd Bcore
           sed -i 's/com.android.application/com.android.library/g' build.gradle
           sed -i '/applicationId/d' build.gradle
-          sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
+          sed -i '/namespace /d' build.gradle
+          sed -i "/android {/a \    namespace \"com.vmecha.vcore\"" build.gradle
 
       - name: Build Bcore AAR
         run: ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon
