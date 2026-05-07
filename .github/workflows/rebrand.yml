@@ -20,7 +20,6 @@ jobs:
 
       - name: Overwrite Root Gradle Files
         run: |
-          # 1. Timpa settings.gradle
           cat > settings.gradle << 'EOF'
           pluginManagement {
               repositories {
@@ -44,12 +43,19 @@ jobs:
           include ':hidden-api'
           EOF
 
-          # 2. Timpa build.gradle root - ini fix error kurung }
           cat > build.gradle << 'EOF'
           plugins {
               id 'com.android.application' version '8.1.0' apply false
               id 'com.android.library' version '8.1.0' apply false
               id 'org.jetbrains.kotlin.android' version '1.8.10' apply false
+          }
+          
+          ext {
+              compileSdkVersion = 34
+              minSdkVersion = 21
+              targetSdkVersion = 34
+              versionCode = 1
+              versionName = "1.0"
           }
           EOF
 
@@ -69,32 +75,25 @@ jobs:
 
       - name: Refactor Source Code
         run: |
-          # 1. Hapus block conflict di semua sub-module
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/buildscript {/,/}/d' {} +
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/repositories {/,/}/d' {} +
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/allprojects {/,/}/d' {} +
-          
-          # 2. Aktifkan AIDL
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
-          
-          # 3. Ganti package di source
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\.niunaijun\.blackbox/com.vmecha.vcore/g' {} +
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g' {} +
-          
-          # 4. Rename folder
           find . -type d -path "*/top/niunaijun/blackbox" | while read dir; do
             newdir=$(echo $dir | sed 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g')
             mkdir -p $(dirname $newdir)
             mv $dir $newdir 2>/dev/null || true
           done
-          
-          # 5. Fix AIDL
-          find . -name "*.aidl" | while read aidl_file; do
-            relative_path=$(echo "$aidl_file" | sed -n 's|.*/aidl/||p' | xargs dirname | tr '/' '.')
-            if [ -n "$relative_path" ]; then
-              sed -i "s|^package .*|package $relative_path;|" "$aidl_file"
-            fi
-          done
+
+      - name: Hardcode SDK Versions
+        run: |
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.compileSdkVersion/34/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.minSdkVersion/21/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.targetSdkVersion/34/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.versionCode/1/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.versionName/"1.0"/g' {} +
 
       - name: Inject Namespace
         run: |
@@ -105,8 +104,6 @@ jobs:
               sed -i 's/package="[^"]*"//g' "$manifest"
               if ! grep -q "namespace" "$module_dir/build.gradle"; then
                 sed -i "/android {/a \    namespace \"$pkg\"" "$module_dir/build.gradle"
-              else
-                sed -i "s|namespace \"[^\"]*\"|namespace \"$pkg\"|g" "$module_dir/build.gradle"
               fi
             fi
           done
