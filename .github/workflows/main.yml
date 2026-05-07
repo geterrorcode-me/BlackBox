@@ -18,29 +18,33 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Force Upgrade to Gradle 8.0
-        # Mengatasi mismatch Java 17 dan Gradle lama
+      - name: Pre-Clean JCenter (Required for Gradle 9+)
         run: |
+          # Hapus jcenter() dari semua file gradle agar Gradle 9 tidak error saat startup
+          find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
+          find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
+          echo "JCenter references removed."
+
+      - name: Force Wrapper to Gradle 8.0
+        run: |
+          # Sekarang Gradle 9 mau berjalan karena jcenter() sudah hilang
           gradle wrapper --gradle-version 8.0 --distribution-type all
 
-      - name: Clean and Patch Project
+      - name: Patch Bcore for AAR
         run: |
-          # 1. Hapus jcenter() karena tidak didukung di Gradle baru
-          find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
-          
-          # 2. Tambahkan google() dan mavenCentral() sebagai repositori utama
+          # Pastikan repositori standar ada
           find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()' {} +
 
-          # 3. Patch Bcore menjadi Library (AAR)
           cd Bcore
+          # Ubah ke Library
           sed -i 's/id "com.android.application"/id "com.android.library"/g' build.gradle 2>/dev/null || true
           sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.library"/g' build.gradle 2>/dev/null || true
           
-          # 4. Hapus applicationId dan tambahkan namespace untuk Gradle 8+
+          # Hapus applicationId dan atur Namespace
           sed -i '/applicationId/d' build.gradle
           sed -i '/android {/a \    namespace "com.vmecha.vcore"' build.gradle
           
-          # 5. Rename package core
+          # Rename package
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
 
       - name: Global String Replacement
@@ -50,10 +54,12 @@ jobs:
       - name: Build Bcore AAR
         run: |
           chmod +x gradlew
+          # Jalankan build menggunakan wrapper 8.0 yang baru dibuat
           ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon
-          
+
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
           name: vmecha-blackbox-core
           path: Bcore/build/outputs/aar/*.aar
+          
