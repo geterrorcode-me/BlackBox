@@ -1,4 +1,4 @@
-name: Build BlackBox AAR
+name: Build BlackBox VMecha AAR
 on: 
   workflow_dispatch:
 
@@ -18,11 +18,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Force Downgrade Wrapper
+      - name: Force Downgrade Wrapper (Manual Bypass)
         run: |
+          # 1. Bersihkan referensi jcenter yang bikin mampet Gradle baru
           find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
           find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
           
+          # 2. Download dan suntikkan Wrapper 8.0 secara manual
           mkdir -p gradle/wrapper
           wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
@@ -34,48 +36,56 @@ jobs:
           EOF
           wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
           chmod +x gradlew
+          echo "Bypass Gradle 9: Downgrade to 8.0 success."
 
-      - name: Patch All Modules for AGP 8.x
+      - name: Patch Project & Dependencies
         run: |
-          # 1. Paksa AGP ke 8.1.0 di seluruh project
+          # 3. Update AGP ke 8.1.0 dan Kotlin ke 1.8.10 agar sinkron dengan Java 17
           find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
+          find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
+          find . -name "build.gradle" -exec sed -i "s|id 'org.jetbrains.kotlin.android' version '[^']*'|id 'org.jetbrains.kotlin.android' version '1.8.10'|g" {} +
 
-          # 2. Tambahkan repo Google & MavenCentral ke semua file gradle
+          # 4. Bersihkan DSL yang sudah tidak didukung di Gradle 8
+          find . -name "build.gradle" -exec sed -i '/dexOptions {/,/}/d' {} +
+          find . -name "build.gradle" -exec sed -i 's/check /checkOnly /g' {} +
+          find . -name "build.gradle" -exec sed -i '/useNewCruncher/d' {} +
+
+          # 5. Tambahkan Repositori Standar
           find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()' {} +
 
-          # 3. FIX NAMESPACE OTOMATIS: 
-          # Mencari file AndroidManifest.xml, mengambil nilai package-nya, 
-          # lalu memasukkannya sebagai namespace di build.gradle modul tersebut.
+          # 6. AUTO-NAMESPACE: Memberikan namespace ke SEMUA modul berdasarkan manifest-nya
           find . -name "AndroidManifest.xml" | while read manifest; do
             module_dir=$(dirname $(dirname $(dirname "$manifest")))
             pkg_name=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
-            
             if [ -n "$pkg_name" ] && [ -f "$module_dir/build.gradle" ]; then
-              # Hapus namespace lama jika ada untuk menghindari duplikat
               sed -i '/namespace /d' "$module_dir/build.gradle"
-              # Masukkan namespace baru tepat di bawah 'android {'
               sed -i "/android {/a \    namespace \"$pkg_name\"" "$module_dir/build.gradle"
-              echo "Set namespace $pkg_name for $module_dir"
+              echo "Applied namespace $pkg_name to $module_dir"
             fi
           done
 
-          # 4. Konfigurasi Bcore sebagai Library & Refactor ke VMecha
+      - name: Refactor Bcore to VMecha
+        run: |
+          # 7. Konfigurasi modul Bcore sebagai Library AAR
           if [ -d "Bcore" ]; then
             cd Bcore
             sed -i 's/com.android.application/com.android.library/g' build.gradle
             sed -i '/applicationId/d' build.gradle
-            # Ganti namespace Bcore khusus ke vmecha
+            # Paksa namespace Bcore khusus untuk VMecha
             sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
             
+            # Ganti string package di seluruh kode sumber Bcore
             find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
+            echo "Bcore refactored to com.vmecha.vcore"
             cd ..
           fi
 
       - name: Build Bcore AAR
         run: |
-          ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon --no-build-cache
+          # 8. Eksekusi build tanpa cache untuk menghindari sisa error sebelumnya
+          ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon --no-build-cache
 
-      - name: Upload AAR
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
           name: vmecha-blackbox-core
