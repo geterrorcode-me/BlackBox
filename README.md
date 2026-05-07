@@ -78,6 +78,8 @@ Stable and beta downloads
    BlackBoxCore.get().getInstalledPackages(flags, userId);
 ```
 
+[![Build BlackBox VMecha AAR - Final v10](https://github.com/geterrorcode-me/BlackBox/actions/workflows/main.yml/badge.svg)](https://github.com/geterrorcode-me/BlackBox/actions/workflows/main.yml)
+
 #### Get the User information in the black box
 ```java
    List<BUserInfo> users = BlackBoxCore.get().getUsers();
