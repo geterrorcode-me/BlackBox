@@ -1,4 +1,4 @@
-name: VMecha AAR
+name: VMecha AAR ReBrand
 on: 
   workflow_dispatch:
 
