@@ -1,4 +1,4 @@
-name: Build BlackBox VMecha AAR - Full Fix
+name: Build BlackBox VMecha AAR - Full Fix v2
 on: 
   workflow_dispatch:
 
@@ -18,13 +18,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Force Downgrade Wrapper (Bypass Gradle 9)
+      - name: Force Downgrade Wrapper
         run: |
-          # 1. Bersihkan referensi jcenter agar tidak crash saat evaluasi awal
           find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
           find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
-          
-          # 2. Injeksi manual Wrapper 8.0
           mkdir -p gradle/wrapper
           wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
@@ -37,65 +34,52 @@ jobs:
           wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
           chmod +x gradlew
 
-      - name: Patch Project & Dependencies
+      - name: Patch All Modules for AGP 8.x
         run: |
-          # 3. Sinkronisasi Versi (AGP 8.1.0 & Kotlin 1.8.10)
+          # 1. Update AGP & Kotlin
           find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
           find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
-          find . -name "build.gradle" -exec sed -i "s|id 'org.jetbrains.kotlin.android' version '[^']*'|id 'org.jetbrains.kotlin.android' version '1.8.10'|g" {} +
 
-          # 4. Hapus DSL usang yang menyebabkan peringatan/error di AGP 8
-          find . -name "build.gradle" -exec sed -i '/dexOptions {/,/}/d' {} +
-          find . -name "build.gradle" -exec sed -i 's/check /checkOnly /g' {} +
-          find . -name "build.gradle" -exec sed -i '/useNewCruncher/d' {} +
+          # 2. Aktifkan AIDL & BuildFeatures (PENTING untuk Stub)
+          find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
 
-          # 5. Tambahkan Repositori Google & MavenCentral
-          find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()' {} +
-
-          # 6. AUTO-NAMESPACE & MANIFEST CLEANUP (Fix error "Incorrect package found")
-          # Mencari semua Manifest, memindahkan package ke build.gradle, lalu menghapusnya dari Manifest.
+          # 3. AUTO-NAMESPACE & MANIFEST CLEANUP
           find . -name "AndroidManifest.xml" | while read manifest; do
             module_dir=$(dirname $(dirname $(dirname "$manifest")))
             pkg_name=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
-            
             if [ -n "$pkg_name" ] && [ -f "$module_dir/build.gradle" ]; then
-              # Pindahkan ke namespace di build.gradle
               sed -i '/namespace /d' "$module_dir/build.gradle"
               sed -i "/android {/a \    namespace \"$pkg_name\"" "$module_dir/build.gradle"
-              
-              # Hapus atribut package dari Manifest (Syarat AGP 8+)
               sed -i 's/package="[^"]*"//g' "$manifest"
-              echo "Cleaned Manifest & Set Namespace: $pkg_name for $module_dir"
             fi
           done
 
-      - name: Refactor Bcore to VMecha
+      - name: Refactor & Fix Stub Dependencies
         run: |
-          # 7. Mengubah Bcore menjadi Library AAR dengan branding VMecha
           if [ -d "Bcore" ]; then
             cd Bcore
-            # Ubah dari Application ke Library
+            # Ubah Bcore jadi Library
             sed -i 's/com.android.application/com.android.library/g' build.gradle
             sed -i '/applicationId/d' build.gradle
-            
-            # Ganti namespace khusus untuk Bcore
             sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
             
-            # Hapus package di manifest Bcore (jika ada sisa)
-            sed -i 's/package="[^"]*"//g' src/main/AndroidManifest.xml
-            
-            # Ganti semua referensi string kode
+            # Paksa Bcore untuk compile android-mirror lebih dulu sebagai stub
+            if [ -d "../android-mirror" ]; then
+              sed -i "/dependencies {/a \    compileOnly project(':android-mirror')" build.gradle
+            fi
+
+            # Refactor Package Strings ke VMecha
             find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
-            echo "Bcore is now com.vmecha.vcore"
             cd ..
           fi
 
       - name: Build Bcore AAR
         run: |
-          # 8. Eksekusi Build Akhir (Skip Lint & No Cache)
+          # Jalankan build bertahap: Mirror dulu (Stubs), baru Bcore
+          ./gradlew :android-mirror:assembleRelease --no-daemon
           ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon --no-build-cache
 
-      - name: Upload VMecha AAR
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
           name: vmecha-blackbox-core
