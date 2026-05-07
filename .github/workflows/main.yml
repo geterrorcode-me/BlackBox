@@ -1,10 +1,12 @@
-name: Build BlackBox VMecha AAR - Final v9
-on: 
+name: Build BlackBox VMecha AAR - Fixed v10
+
+on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -12,18 +14,22 @@ jobs:
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: 17
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Force Downgrade Wrapper
+      # =========================================================
+      # FORCE GRADLE 8
+      # =========================================================
+      - name: Force Gradle Wrapper
         run: |
-          find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
-          find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
           mkdir -p gradle/wrapper
-          wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+
+          wget -O gradle/wrapper/gradle-wrapper.jar \
+          https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -31,18 +37,42 @@ jobs:
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
           EOF
-          wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
+
+          wget -O gradlew \
+          https://github.com/gradle/gradle/raw/v8.0.0/gradlew
+
           chmod +x gradlew
 
-      - name: Patch Repositories & Settings
+      # =========================================================
+      # PATCH REPOSITORIES
+      # =========================================================
+      - name: Patch Repositories
         run: |
-          find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
-          find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
 
-          if [ -f "settings.gradle" ]; then
-            cat > settings.gradle.tmp << 'EOF'
+          # remove jcenter
+          find . -name "*.gradle" \
+          -exec sed -i '/jcenter()/d' {} +
+
+          find . -name "*.gradle" \
+          -exec sed -i '/jCenter()/d' {} +
+
+          # upgrade agp
+          find . -name "*.gradle" \
+          -exec sed -i \
+          "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
+
+          # upgrade kotlin
+          find . -name "*.gradle" \
+          -exec sed -i \
+          "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
+
+          # rewrite settings.gradle
+          if [ -f settings.gradle ]; then
+
+          cat > settings.gradle.tmp << 'EOF'
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+
               repositories {
                   google()
                   mavenCentral()
@@ -51,66 +81,207 @@ jobs:
               }
           }
           EOF
-            grep "include" settings.gradle >> settings.gradle.tmp
-            mv settings.gradle.tmp settings.gradle
+
+          grep "include" settings.gradle >> settings.gradle.tmp
+
+          mv settings.gradle.tmp settings.gradle
+
           fi
 
-      - name: Global Refactor & Targetted R Fix
+      # =========================================================
+      # GLOBAL FIX
+      # =========================================================
+      - name: Global Refactor
         run: |
-          # 1. Aktifkan AIDL & CMake Project
-          find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
-          find . -name "CMakeLists.txt" -exec sed -i '/cmake_minimum_required/a project(VMechaNative)' {} +
-          
-          # 2. Namespace & Manifest Cleanup
-          find . -name "AndroidManifest.xml" | while read manifest; do
-            module_dir=$(dirname $(dirname $(dirname "$manifest")))
-            pkg_name=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "")
-            if [ -n "$pkg_name" ] && [ -f "$module_dir/build.gradle" ]; then
-              sed -i '/namespace /d' "$module_dir/build.gradle"
-              sed -i "/android {/a \    namespace \"$pkg_name\"" "$module_dir/build.gradle"
-              sed -i 's/package="[^"]*"//g' "$manifest"
-            fi
-          done
 
-          # 3. SMART R-FIX (Hanya untuk modul Bcore)
-          # Ganti import R lama ke baru di seluruh project
-          find . -type f \( -name "*.java" -o -name "*.kt" \) -exec sed -i 's/top\.niunaijun\.blackbox\.R/com.vmecha.vcore.R/g' {} +
-          
-          # Hanya suntik import R ke file di dalam modul Bcore yang memanggil simbol R tapi tidak punya importnya
-          if [ -d "Bcore/src/main/java" ]; then
-            find Bcore/src/main/java -type f \( -name "*.java" -o -name "*.kt" \) | xargs grep -l "R\." | while read file; do
-              if ! grep -q "import com.vmecha.vcore.R" "$file"; then
-                sed -i '/package /a import com.vmecha.vcore.R;' "$file"
+          # =====================================================
+          # ENABLE AIDL
+          # =====================================================
+
+          find . -name "build.gradle" | while read file; do
+
+            if grep -q "android {" "$file"; then
+
+              if ! grep -q "buildFeatures" "$file"; then
+                sed -i '/android {/a\
+    buildFeatures {\n\
+        aidl true\n\
+    }' "$file"
               fi
-            done
-          fi
-          
-          # 4. Refactor String Package Umum
-          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
 
-          # 5. Fix AIDL Package Mismatch
-          find . -name "*.aidl" | while read aidl_file; do
-            relative_path=$(echo "$aidl_file" | sed -n 's|.*/aidl/||p' | xargs dirname | tr '/' '.')
-            if [ -n "$relative_path" ]; then
-              sed -i "s|^package .*|package $relative_path;|" "$aidl_file"
             fi
+
           done
 
-      - name: Finalize Module Config
-        run: |
-          if [ -d "Bcore" ]; then
-            cd Bcore
-            sed -i 's/com.android.application/com.android.library/g' build.gradle
-            sed -i '/applicationId/d' build.gradle
-            sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
-            cd ..
+          # =====================================================
+          # FIX CMAKE
+          # =====================================================
+
+          find . -name "CMakeLists.txt" | while read file; do
+
+            if ! grep -q "project(" "$file"; then
+              sed -i '1i project(VMechaNative)' "$file"
+            fi
+
+          done
+
+          # =====================================================
+          # MANIFEST + NAMESPACE FIX
+          # =====================================================
+
+          find . -name "AndroidManifest.xml" | while read manifest; do
+
+            module_dir=$(dirname "$(dirname "$(dirname "$manifest")")")
+
+            pkg_name=$(grep -oP 'package="\K[^"]+' "$manifest" || true)
+
+            if [ -n "$pkg_name" ] && [ -f "$module_dir/build.gradle" ]; then
+
+              sed -i '/namespace /d' "$module_dir/build.gradle"
+
+              sed -i "/android {/a\
+    namespace \"$pkg_name\"" "$module_dir/build.gradle"
+
+              sed -i 's/package="[^"]*"//g' "$manifest"
+
+            fi
+
+          done
+
+          # =====================================================
+          # SAFE IMPORT REPLACE
+          # =====================================================
+
+          find . -type f \( -name "*.java" -o -name "*.kt" \) \
+          -exec sed -i \
+          's/import top\.niunaijun\.blackbox\.R;/import com.vmecha.vcore.R;/g' {} +
+
+          # =====================================================
+          # SAFE R IMPORT INJECTION (JAVA ONLY)
+          # =====================================================
+
+          if [ -d "Bcore/src/main/java" ]; then
+
+            find Bcore/src/main/java -type f -name "*.java" | while read file; do
+
+              if grep -q "R\." "$file"; then
+
+                if ! grep -q "^import com\.vmecha\.vcore\.R;" "$file"; then
+
+                  awk '
+                  /^package / {
+                    print
+                    print "import com.vmecha.vcore.R;"
+                    next
+                  }
+
+                  { print }
+                  ' "$file" > "$file.tmp"
+
+                  mv "$file.tmp" "$file"
+
+                fi
+
+              fi
+
+            done
+
           fi
 
+          # =====================================================
+          # PACKAGE REFACTOR
+          # =====================================================
+
+          find . -type f \
+          \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) \
+          -exec sed -i \
+          's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
+
+          # =====================================================
+          # FIX AIDL PACKAGE
+          # =====================================================
+
+          find . -name "*.aidl" | while read aidl; do
+
+            rel=$(echo "$aidl" | sed -n 's|.*/aidl/||p' | xargs dirname | tr '/' '.')
+
+            if [ -n "$rel" ]; then
+              sed -i "s|^package .*|package $rel;|" "$aidl"
+            fi
+
+          done
+
+      # =========================================================
+      # FINAL MODULE FIX
+      # =========================================================
+      - name: Finalize Bcore
+        run: |
+
+          if [ -d Bcore ]; then
+
+            cd Bcore
+
+            # app -> library
+            sed -i \
+            's/com.android.application/com.android.library/g' \
+            build.gradle
+
+            # remove applicationId
+            sed -i '/applicationId/d' build.gradle
+
+            # force namespace
+            sed -i '/namespace /d' build.gradle
+
+            sed -i '/android {/a\
+    namespace "com.vmecha.vcore"' build.gradle
+
+            cd ..
+
+          fi
+
+      # =========================================================
+      # CLEAN BAD IMPORTS
+      # =========================================================
+      - name: Cleanup Broken Imports
+        run: |
+
+          find Bcore/src/main/java -name "*.java" | while read file; do
+
+            awk '
+            BEGIN { imported=0 }
+
+            {
+              if ($0 == "import com.vmecha.vcore.R;") {
+
+                if (imported == 0) {
+                  print
+                  imported=1
+                }
+
+              } else {
+                print
+              }
+            }
+            ' "$file" > "$file.tmp"
+
+            mv "$file.tmp" "$file"
+
+          done
+
+      # =========================================================
+      # BUILD
+      # =========================================================
       - name: Build Bcore AAR
         run: |
-          ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon
+          ./gradlew :Bcore:assembleRelease \
+          --stacktrace \
+          --no-daemon \
+          -x lint
 
-      - name: Upload VMecha AAR
+      # =========================================================
+      # UPLOAD
+      # =========================================================
+      - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
           name: vmecha-blackbox-core
