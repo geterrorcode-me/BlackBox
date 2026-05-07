@@ -1,4 +1,4 @@
-name: Build BlackBox VMecha AAR - Final
+name: Build BlackBox VMecha AAR - Final v8
 on: 
   workflow_dispatch:
 
@@ -57,8 +57,9 @@ jobs:
 
       - name: Global Refactor & Fix R Symbol
         run: |
-          # 1. Aktifkan AIDL
+          # 1. Aktifkan AIDL & CMake Project
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
+          find . -name "CMakeLists.txt" -exec sed -i '/cmake_minimum_required/a project(VMechaNative)' {} +
           
           # 2. Namespace & Manifest Cleanup
           find . -name "AndroidManifest.xml" | while read manifest; do
@@ -71,9 +72,13 @@ jobs:
             fi
           done
 
-          # 3. FIX R IMPORT: Ganti semua import R lama ke namespace baru
-          # Kita cari 'top.niunaijun.blackbox.R' dan ganti ke 'com.vmecha.vcore.R'
+          # 3. FIX R IMPORT & USAGE (Sangat Penting)
+          # Ganti import R lama ke baru
           find . -type f \( -name "*.java" -o -name "*.kt" \) -exec sed -i 's/top\.niunaijun\.blackbox\.R/com.vmecha.vcore.R/g' {} +
+          
+          # SUNTIK IMPORT R: Untuk file yang menggunakan R tapi tidak punya import (seperti BlackBoxCore.java)
+          # Kita tambahkan import com.vmecha.vcore.R tepat setelah baris package
+          find . -type f \( -name "*.java" -o -name "*.kt" \) -exec sed -i '/package /a import com.vmecha.vcore.R;' {} +
           
           # 4. Refactor String Package Umum
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
@@ -86,7 +91,7 @@ jobs:
             fi
           done
 
-      - name: Configure Bcore as Library
+      - name: Finalize Module Config
         run: |
           if [ -d "Bcore" ]; then
             cd Bcore
@@ -105,3 +110,4 @@ jobs:
         with:
           name: vmecha-blackbox-core
           path: Bcore/build/outputs/aar/*.aar
+          
