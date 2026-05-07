@@ -1,4 +1,4 @@
-name: VMecha AAR ReBrand
+name: VMecha AAR
 on: 
   workflow_dispatch:
 
@@ -21,7 +21,6 @@ jobs:
       - name: Force Downgrade Wrapper
         run: |
           find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
-          find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
           mkdir -p gradle/wrapper
           wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
@@ -47,7 +46,6 @@ jobs:
                   google()
                   mavenCentral()
                   maven { url 'https://jitpack.io' }
-                  maven { url 'https://maven.aliyun.com/repository/public' }
               }
           }
           EOF
@@ -57,40 +55,47 @@ jobs:
 
       - name: Global Refactor Source
         run: |
-          # 1. Aktifkan AIDL
+          find . -name "build.gradle" -exec sed -i '/repositories {/,/}/d' {} +
+          find . -name "build.gradle" -exec sed -i '/allprojects {/,/}/d' {} +
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
-          
-          # 2. Ganti semua import di source
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\.niunaijun\.blackbox/com.vmecha.vcore/g' {} +
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g' {} +
-          
-          # 3. Rename folder source
           find . -type d -path "*/top/niunaijun/blackbox" | while read dir; do
             newdir=$(echo $dir | sed 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g')
             mkdir -p $(dirname $newdir)
             mv $dir $newdir 2>/dev/null || true
           done
-
-          # 4. Fix AIDL Package
           find . -name "*.aidl" | while read aidl_file; do
             relative_path=$(echo "$aidl_file" | sed -n 's|.*/aidl/||p' | xargs dirname | tr '/' '.')
             if [ -n "$relative_path" ]; then
               sed -i "s|^package .*|package $relative_path;|" "$aidl_file"
             fi
           done
-
-          # 5. Patch ProGuard
           find . -name "proguard*.pro" -exec sed -i 's/top\.niunaijun\.blackbox/com.vmecha.vcore/g' {} +
-          find . -name "proguard*.pro" -exec sed -i 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g' {} +
 
-      - name: Finalize Module Config
+      - name: Inject Namespace to All Modules
+        run: |
+          find . -name "AndroidManifest.xml" | while read manifest; do
+            module_dir=$(dirname $(dirname "$manifest"))
+            if [ -f "$module_dir/build.gradle" ]; then
+              pkg=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "com.vmecha.vcore.$(basename $module_dir | tr '-' '_')")
+              sed -i 's/package="[^"]*"//g' "$manifest"
+              if ! grep -q "namespace" "$module_dir/build.gradle"; then
+                sed -i "/android {/a \    namespace \"$pkg\"" "$module_dir/build.gradle"
+              else
+                sed -i "s|namespace \"[^\"]*\"|namespace \"$pkg\"|g" "$module_dir/build.gradle"
+              fi
+              echo "Set namespace $pkg for $module_dir"
+            fi
+          done
+
+      - name: Finalize Bcore Module
         run: |
           if [ -d "Bcore" ]; then
             cd Bcore
             sed -i 's/com.android.application/com.android.library/g' build.gradle
             sed -i '/applicationId/d' build.gradle
             sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
-            cd ..
           fi
 
       - name: Build Bcore AAR
@@ -100,30 +105,17 @@ jobs:
       - name: Repack AAR to com.vmecha.vcore
         run: |
           AAR_PATH=$(find Bcore/build/outputs/aar -name "*.aar" | head -1)
-          echo "Found AAR: $AAR_PATH"
-          
           wget -q https://repo1.maven.org/maven2/com/googlecode/jarjar/jarjar/1.4/jarjar-1.4.jar
-          rm -rf temp_aar
-          mkdir temp_aar && cd temp_aar
+          rm -rf temp_aar && mkdir temp_aar && cd temp_aar
           unzip -q ../$AAR_PATH
-          
           cat > rules.txt << 'EOF'
           rule top.niunaijun.blackbox.** com.vmecha.vcore.@1
           EOF
-          
-          echo "=== Repacking classes.jar ==="
           java -jar ../jarjar-1.4.jar process rules.txt classes.jar classes-new.jar
           mv classes-new.jar classes.jar
-          
-          # Update AndroidManifest.xml namespace
           sed -i 's/package="top.niunaijun.blackbox"/package="com.vmecha.vcore"/g' AndroidManifest.xml
-          
-          echo "=== Re-zip AAR ==="
           zip -r -q ../vmecha-vm.aar .
           cd ..
-          
-          echo "=== Verifikasi hasil ==="
-          unzip -p vmecha-vm.aar classes.jar | jar tf | grep "com/vmecha/vcore" | head -5
 
       - name: Upload VMecha AAR
         uses: actions/upload-artifact@v4
