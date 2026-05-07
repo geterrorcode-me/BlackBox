@@ -18,26 +18,29 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Force Upgrade to Gradle 8.0
+        # Mengatasi mismatch Java 17 dan Gradle lama
+        run: |
+          gradle wrapper --gradle-version 8.0 --distribution-type all
+
       - name: Clean and Patch Project
         run: |
-          # 1. Hapus semua referensi jcenter() yang menyebabkan crash di Gradle 9
+          # 1. Hapus jcenter() karena tidak didukung di Gradle baru
           find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
           
-          # 2. Pastikan mavenCentral() dan google() ada sebagai pengganti
-          # Kita tambahkan di baris setelah 'repositories {'
+          # 2. Tambahkan google() dan mavenCentral() sebagai repositori utama
           find . -name "*.gradle" -exec sed -i '/repositories {/a \        google()\n        mavenCentral()' {} +
 
-          # 3. Patch Bcore menjadi Library
+          # 3. Patch Bcore menjadi Library (AAR)
           cd Bcore
           sed -i 's/id "com.android.application"/id "com.android.library"/g' build.gradle 2>/dev/null || true
           sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.library"/g' build.gradle 2>/dev/null || true
           
-          # 4. Hapus applicationId dan tambahkan namespace
+          # 4. Hapus applicationId dan tambahkan namespace untuk Gradle 8+
           sed -i '/applicationId/d' build.gradle
-          # Tambahkan namespace di baris setelah 'android {'
           sed -i '/android {/a \    namespace "com.vmecha.vcore"' build.gradle
           
-          # 5. Rename package core ke VMecha
+          # 5. Rename package core
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
 
       - name: Global String Replacement
@@ -47,7 +50,6 @@ jobs:
       - name: Build Bcore AAR
         run: |
           chmod +x gradlew
-          # Kita jalankan assembleRelease untuk modul Bcore
           ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon
           
       - name: Upload AAR
