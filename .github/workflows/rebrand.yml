@@ -1,4 +1,4 @@
-name: VMecha AAR
+name: Build BlackBox VMecha AAR
 on: 
   workflow_dispatch:
 
@@ -18,8 +18,23 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Overwrite Root Gradle Files
+      - name: Setup Gradle Wrapper
         run: |
+          mkdir -p gradle/wrapper
+          wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-all.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+          wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
+          chmod +x gradlew
+
+      - name: Auto Generate settings.gradle
+        run: |
+          # Auto include semua module + sub-module
           cat > settings.gradle << 'EOF'
           pluginManagement {
               repositories {
@@ -37,12 +52,24 @@ jobs:
               }
           }
           rootProject.name = "VMecha"
-          include ':Bcore'
-          include ':app'
-          include ':android-mirror'
-          include ':hidden-api'
           EOF
+          
+          # Include semua folder yg ada build.gradle
+          find . -name "build.gradle" -not -path "./build.gradle" | while read file; do
+            dir=$(dirname "$file" | sed 's|^\./||')
+            echo "include ':$dir'" >> settings.gradle
+          done
+          
+          # Fix path pake : jadi :Bcore:black-fake
+          sed -i 's|/:|:|g' settings.gradle
+          sed -i 's|/|🜲|g' settings.gradle
+          sed -i 's|🜲|:|g' settings.gradle
+          
+          echo "=== settings.gradle ==="
+          cat settings.gradle
 
+      - name: Overwrite Root build.gradle
+        run: |
           cat > build.gradle << 'EOF'
           plugins {
               id 'com.android.application' version '8.1.0' apply false
@@ -55,56 +82,77 @@ jobs:
               minSdkVersion = 21
               targetSdkVersion = 34
               buildToolsVersion = "34.0.0"
-              versionCode = 1
-              versionName = "1.0"
-              kotlin_version = "1.8.10"
           }
           EOF
 
-      - name: Setup Gradle Wrapper
+      - name: Global Refactor & Clean
         run: |
-          mkdir -p gradle/wrapper
-          wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-all.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOF
-          wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
-          chmod +x gradlew
-
-      - name: Refactor Source Code
-        run: |
+          # 1. Hapus block conflict di semua sub-module
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/buildscript {/,/}/d' {} +
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/repositories {/,/}/d' {} +
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/allprojects {/,/}/d' {} +
+          
+          # 2. Hardcode semua ext
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.compileSdkVersion/34/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.minSdkVersion/21/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.targetSdkVersion/34/g' {} +
+          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.buildToolsVersion/"34.0.0"/g' {} +
+          find . -name "build.gradle" -exec sed -i '/buildToolsVersion/d' {} +
+          
+          # 3. Aktifkan AIDL
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
+          
+          # 4. Rebrand package
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\.niunaijun\.blackbox/com.vmecha.vcore/g' {} +
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g' {} +
+          
+          # 5. Rename folder
           find . -type d -path "*/top/niunaijun/blackbox" | while read dir; do
             newdir=$(echo $dir | sed 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g')
             mkdir -p $(dirname $newdir)
             mv $dir $newdir 2>/dev/null || true
           done
 
-      - name: Hardcode SDK Versions
-        run: |
-          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.compileSdkVersion/34/g' {} +
-          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.minSdkVersion/21/g' {} +
-          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.targetSdkVersion/34/g' {} +
-          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.buildToolsVersion/"34.0.0"/g' {} +
-          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.versionCode/1/g' {} +
-          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.versionName/"1.0"/g' {} +
-          find . -name "build.gradle" -exec sed -i 's/rootProject\.ext\.kotlin_version/"1.8.10"/g' {} +
-          find . -name "build.gradle" -exec sed -i '/buildToolsVersion/d' {} +
-
-      - name: Inject Namespace
+      - name: Inject Namespace All Modules
         run: |
           find . -name "AndroidManifest.xml" | while read manifest; do
             module_dir=$(dirname $(dirname "$manifest"))
             if [ -f "$module_dir/build.gradle" ]; then
+              pkg=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "com.vmecha.vcore.$(basename $module_dir | tr '-' '_')")
+              sed -i 's/package="[^"]*"//g' "$manifest"
+              if ! grep -q "namespace" "$module_dir/build.gradle"; then
+                sed -i "/android {/a \    namespace \"$pkg\"" "$module_dir/build.gradle"
+              fi
+            fi
+          done
+
+      - name: Finalize Bcore
+        run: |
+          cd Bcore
+          sed -i 's/com.android.application/com.android.library/g' build.gradle
+          sed -i '/applicationId/d' build.gradle
+          sed -i 's/namespace "[^"]*"/namespace "com.vmecha.vcore"/g' build.gradle
+
+      - name: Build Bcore AAR
+        run: ./gradlew :Bcore:assembleRelease -x lint --stacktrace --no-daemon
+
+      - name: Repack to com.vmecha.vcore
+        run: |
+          AAR=$(find Bcore/build/outputs/aar -name "*.aar" | head -1)
+          wget -q https://repo1.maven.org/maven2/com/googlecode/jarjar/jarjar/1.4/jarjar-1.4.jar
+          rm -rf temp_aar && mkdir temp_aar && cd temp_aar
+          unzip -q ../$AAR
+          echo "rule top.niunaijun.blackbox.** com.vmecha.vcore.@1" > rules.txt
+          java -jar ../jarjar-1.4.jar process rules.txt classes.jar classes-new.jar
+          mv classes-new.jar classes.jar
+          sed -i 's/package="top.niunaijun.blackbox"/package="com.vmecha.vcore"/g' AndroidManifest.xml
+          zip -r -q ../vmecha-vm.aar .
+
+      - name: Upload VMecha AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmecha-vm-aar
+          path: vmecha-vm.aar            if [ -f "$module_dir/build.gradle" ]; then
               pkg=$(grep -oP 'package="\K[^"]+' "$manifest" || echo "com.vmecha.vcore.$(basename $module_dir | tr '-' '_')")
               sed -i 's/package="[^"]*"//g' "$manifest"
               if ! grep -q "namespace" "$module_dir/build.gradle"; then
