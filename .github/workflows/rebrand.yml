@@ -93,6 +93,11 @@ jobs:
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/allprojects {/,/}/d' {} +
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
           find . -name "build.gradle" -exec sed -i '/buildToolsVersion/d' {} +
+          # Hapus task Javadoc/Dokka yg bikin error
+          find . -name "build.gradle" -exec sed -i '/tasks.withType(Javadoc)/, /}/d' {} +
+          find . -name "build.gradle" -exec sed -i '/tasks.withType(DokkaTask)/, /}/d' {} +
+          find . -name "build.gradle" -exec sed -i '/javadoc {/ , /}/d' {} +
+          find . -name "build.gradle" -exec sed -i '/publishing {/ , /}/d' {} +
 
       - name: Rebrand Source Code
         run: |
