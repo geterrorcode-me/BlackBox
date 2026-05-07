@@ -1,4 +1,11 @@
-name: Build BlackBox VMecha AAR - Final v8
+
+      - name: Upload VMecha AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmecha-blackbox-core
+          path: Bcore/build/outputs/aar/*.aar
+          
+name: Build BlackBox VMecha AAR - Final v9
 on: 
   workflow_dispatch:
 
@@ -55,7 +62,7 @@ jobs:
             mv settings.gradle.tmp settings.gradle
           fi
 
-      - name: Global Refactor & Fix R Symbol
+      - name: Global Refactor & Targetted R Fix
         run: |
           # 1. Aktifkan AIDL & CMake Project
           find . -name "build.gradle" -exec sed -i '/android {/a \    buildFeatures { aidl true }' {} +
@@ -72,13 +79,18 @@ jobs:
             fi
           done
 
-          # 3. FIX R IMPORT & USAGE (Sangat Penting)
-          # Ganti import R lama ke baru
+          # 3. SMART R-FIX (Hanya untuk modul Bcore)
+          # Ganti import R lama ke baru di seluruh project
           find . -type f \( -name "*.java" -o -name "*.kt" \) -exec sed -i 's/top\.niunaijun\.blackbox\.R/com.vmecha.vcore.R/g' {} +
           
-          # SUNTIK IMPORT R: Untuk file yang menggunakan R tapi tidak punya import (seperti BlackBoxCore.java)
-          # Kita tambahkan import com.vmecha.vcore.R tepat setelah baris package
-          find . -type f \( -name "*.java" -o -name "*.kt" \) -exec sed -i '/package /a import com.vmecha.vcore.R;' {} +
+          # Hanya suntik import R ke file di dalam modul Bcore yang memanggil simbol R tapi tidak punya importnya
+          if [ -d "Bcore/src/main/java" ]; then
+            find Bcore/src/main/java -type f \( -name "*.java" -o -name "*.kt" \) | xargs grep -l "R\." | while read file; do
+              if ! grep -q "import com.vmecha.vcore.R" "$file"; then
+                sed -i '/package /a import com.vmecha.vcore.R;' "$file"
+              fi
+            done
+          fi
           
           # 4. Refactor String Package Umum
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/black\.habakuk\.core/com.vmecha.vcore/g' {} +
@@ -110,4 +122,3 @@ jobs:
         with:
           name: vmecha-blackbox-core
           path: Bcore/build/outputs/aar/*.aar
-          
