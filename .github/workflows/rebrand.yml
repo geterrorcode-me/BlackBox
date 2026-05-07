@@ -94,8 +94,9 @@ jobs:
           find . -name "build.gradle" -exec sed -i '/tasks.withType(DokkaTask)/, /}/d' {} +
           find . -name "build.gradle" -exec sed -i '/javadoc {/ , /}/d' {} +
           find . -name "build.gradle" -exec sed -i '/publishing {/ , /}/d' {} +
-          # Fix free-reflection: underscore -> dash + hardcode versi
-          find . -name "build.gradle" -exec sed -i 's|me.weishu:free_reflection:3.0.1|me.weishu:free-reflection:3.0.1|g' {} +
+          # Replace CodingGay -> me.weishu
+          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay:BlackReflection:1.1.2|me.weishu:free-reflection:3.0.1|g' {} +
+          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay:BlackReflection:compiler:1.1.2||g' {} +
           find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:$rootProject.ext.blackReflection|me.weishu:free-reflection:3.0.1|g' {} +
           find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:$blackReflection|me.weishu:free-reflection:3.0.1|g' {} +
           find . -name "build.gradle" -exec sed -i 's|org.ow2.asm:asm:$rootProject.ext.asm_version|org.ow2.asm:asm:9.2|g' {} +
