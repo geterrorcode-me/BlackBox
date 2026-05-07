@@ -69,31 +69,29 @@ jobs:
           }
           EOF
 
-      - name: Clean and Fix Sub-Module Gradle
+      - name: Clean and Precise Fix Gradle
         run: |
-          # 1. Hapus blokir buildscript/repositories/allprojects yang konflik
+          # 1. Hapus blokir yang tidak perlu
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/buildscript {/,/}/d' {} +
           find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/repositories {/,/}/d' {} +
-          find . -name "build.gradle" -not -path "./build.gradle" -exec sed -i '/allprojects {/,/}/d' {} +
-
-          # 2. Perbaikan Penggantian Library (Gunakan delimiter | agar lebih aman)
-          # Ganti format library CodingGay ke FreeReflection tanpa merusak tanda kutip
-          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay:BlackReflection:1.1.2|me.weishu:free-reflection:3.0.1|g' {} +
-          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:.*|me.weishu:free-reflection:3.0.1|g' {} +
           
-          # Hapus compiler BlackReflection jika ada (tidak dibutuhkan di me.weishu)
-          find . -name "build.gradle" -exec sed -i 's|.*com.github.CodingGay:BlackReflection:compiler.*||g' {} +
+          # 2. FIX KRITIKAL: Mengganti library dengan memastikan quote penutup tetap ada
+          # Kita mencari string yang dimulai dengan com.github.CodingGay dan mengganti seluruh isi di dalam quote
+          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay:BlackReflection:[^"]*|me.weishu:free-reflection:3.0.1|g' {} +
+          find . -name "build.gradle" -exec sed -i 's|com.github.CodingGay.BlackReflection:core:[^"]*|me.weishu:free-reflection:3.0.1|g' {} +
           
-          # 3. Hapus blok logic IF yang sering menyebabkan error jika variable ext dihapus
+          # Hapus baris compiler jika ada
+          find . -name "build.gradle" -exec sed -i '/BlackReflection:compiler/d' {} +
+          
+          # Hapus blok pengecekan variabel yang sering bikin crash CI
           find . -name "build.gradle" -exec sed -i '/if (.*blackReflection)/,/}/d' {} +
-          find . -name "build.gradle" -exec sed -i '/if (.*useAsm)/,/}/d' {} +
 
       - name: Rebrand Source Code
         run: |
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\.niunaijun\.blackbox/com.vmecha.vcore/g' {} +
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" \) -exec sed -i 's/top\/niunaijun\/blackbox/com\/vmecha\/vcore/g' {} +
 
-      - name: Force Inject Namespace
+      - name: Force Inject Namespace & AIDL
         run: |
           find . -name "build.gradle" -not -path "./build.gradle" | while read gradle_file; do
             if grep -q "android {" "$gradle_file"; then
