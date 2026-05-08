@@ -35,7 +35,7 @@ jobs:
           wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
           chmod +x gradlew
 
-      - name: Rewrite Root build.gradle (Define Ext Properties)
+      - name: Rewrite Root build.gradle (Define Missing Ext Properties)
         run: |
           cat > build.gradle << 'EOF'
           buildscript {
@@ -50,13 +50,18 @@ jobs:
               }
           }
 
-          // Mendefinisikan properti yang dicari oleh sub-modul (seperti android-mirror)
           allprojects {
               ext {
+                  // Properti standar Android
                   compileSdkVersion = 33
                   minSdkVersion = 21
                   targetSdkVersion = 33
                   buildToolsVersion = "33.0.1"
+                  
+                  // Properti khusus BlackBox yang dicari oleh sub-modul
+                  blackReflection = "com.github.tiann:FreeReflection:0.1.0"
+                  // Tambahkan stub/fake framework jika dibutuhkan oleh modul lain
+                  blackFake = ":Bcore:black-fake"
               }
           }
 
@@ -87,7 +92,7 @@ jobs:
           include ':android-mirror'
           EOF
 
-      - name: Smart Repackage (Refactor Only)
+      - name: Smart Repackage (Refactor)
         run: |
           OLD_PKG="top.niunaijun.blackbox"
           NEW_PKG="com.vmecha.vcore"
@@ -106,7 +111,7 @@ jobs:
             done
           done
 
-      - name: Fix Sub-Modules Namespace & Library Type
+      - name: Fix Sub-Modules Namespace & Dependencies
         run: |
           modules=("Bcore" "Bcore/black-fake" "Bcore/black-hook" "Bcore/pine-xposed" "Bcore/pine-core" "Bcore/pine-xposed-res" "android-mirror")
           
@@ -117,7 +122,7 @@ jobs:
               sed -i '/applicationId/d' "$mod/build.gradle"
               
               # Set Namespace unik
-              suffix=$(echo $mod | sed 's|/|.|g')
+              suffix=$(echo $mod | sed 's|/|.|g' | sed 's|-||g')
               sed -i '/namespace /d' "$mod/build.gradle"
               sed -i "/android {/a \    namespace \"com.vmecha.vcore.$suffix\"" "$mod/build.gradle"
             fi
@@ -125,12 +130,13 @@ jobs:
 
       - name: Build Core Engine
         run: |
+          # Jalankan build assembleRelease
           ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon -x lint
 
       - name: Upload Repackaged Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vMecha-VCore-AAR
+          name: vMecha-Repackaged-AAR
           path: |
             **/build/outputs/aar/*.aar
             **/build/libs/*.jar
