@@ -1,4 +1,4 @@
-name: Build BlackBox VMecha - JDK 17 Stable
+name: Build BlackBox VMecha - Full Repackage JDK 17
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Source
         uses: actions/checkout@v4
 
       - name: Setup JDK 17
@@ -24,7 +24,6 @@ jobs:
         run: |
           rm -rf gradle/wrapper
           mkdir -p gradle/wrapper
-          # Menggunakan Gradle 8.0 agar support JDK 17 tanpa error 'major version 61'
           wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
@@ -36,18 +35,8 @@ jobs:
           wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
           chmod +x gradlew
 
-      - name: Fix Repositories & AGP
+      - name: Rewrite Settings (Fixed Nested Paths)
         run: |
-          # Hapus jcenter yang sudah mati
-          find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
-          find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
-          
-          # Upgrade AGP ke 8.1.0 agar kompatibel dengan JDK 17
-          find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
-
-      - name: Rewrite Settings & Dependency Mode
-        run: |
-          # Memaksa mode repositori agar tidak konflik saat resolusi library
           cat > settings.gradle << 'EOF'
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
@@ -55,54 +44,72 @@ jobs:
                   google()
                   mavenCentral()
                   maven { url 'https://jitpack.io' }
+                  maven { url 'https://maven.aliyun.com/repository/public' }
               }
           }
-          include ':Bcore', ':stub'
+          rootProject.name = "BlackBox"
+          include ':Bcore'
+          include ':Bcore:black-fake'
+          include ':Bcore:black-hook'
+          include ':Bcore:pine-xposed'
+          include ':Bcore:pine-core'
+          include ':Bcore:pine-xposed-res'
+          include ':android-mirror'
           EOF
 
-      - name: Smart Repackage (Protect Black/Stub)
+      - name: Smart Repackage (Keep Internal Stubs)
         run: |
           OLD_PKG="top.niunaijun.blackbox"
           NEW_PKG="com.vmecha.vcore"
           OLD_PATH="top/niunaijun/blackbox"
           NEW_PATH="com/vmecha/vcore"
 
-          # Hanya ganti package utama, jangan sentuh 'black.android.os'
-          # Boundary \b memastikan 'blackbox' tidak tertukar dengan 'black'
+          # Global replace package name dengan boundary (\b) agar presisi
           find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" -o -name "*.gradle" \) \
           -exec sed -i "s|\b$OLD_PKG\b|$NEW_PKG|g" {} +
 
-          # Pindahkan folder fisik
-          find . -type d -path "*/src/main/java/$OLD_PATH" | while read dir; do
-            base=$(echo "$dir" | sed "s|/$OLD_PATH||")
-            mkdir -p "$base/$NEW_PATH"
-            cp -r "$dir/"* "$base/$NEW_PATH/" || true
-            rm -rf "$dir"
+          # Move folder fisik untuk Java & AIDL
+          for TYPE in "java" "aidl"; do
+            find . -type d -path "*/src/main/$TYPE/$OLD_PATH" | while read dir; do
+              base=$(echo "$dir" | sed "s|/$OLD_PATH||")
+              mkdir -p "$base/$NEW_PATH"
+              cp -r "$dir/"* "$base/$NEW_PATH/" || true
+              rm -rf "$dir"
+            done
           done
 
-      - name: Fix Namespace (Required by AGP 8+)
+      - name: Auto-Fix Namespaces & Library Type
         run: |
-          # Bcore Namespace
-          if [ -d Bcore ]; then
-            sed -i 's/com.android.application/com.android.library/g' Bcore/build.gradle
-            sed -i '/applicationId/d' Bcore/build.gradle
-            sed -i '/android {/a \    namespace "com.vmecha.vcore"' Bcore/build.gradle
-          fi
-          # Stub Namespace (Tetap pakai black agar tidak NoClassDefFoundError)
-          if [ -d stub ]; then
-            sed -i '/android {/a \    namespace "black.android.os"' stub/build.gradle
-          fi
+          # Daftar semua modul sesuai settings.gradle
+          modules=("Bcore" "Bcore/black-fake" "Bcore/black-hook" "Bcore/pine-xposed" "Bcore/pine-core" "Bcore/pine-xposed-res" "android-mirror")
+          
+          for mod in "${modules[@]}"; do
+            if [ -f "$mod/build.gradle" ]; then
+              echo "Fixing module: $mod"
+              # 1. Pastikan jadi Library, bukan Application
+              sed -i 's/com.android.application/com.android.library/g' "$mod/build.gradle"
+              sed -i '/applicationId/d' "$mod/build.gradle"
+              
+              # 2. Tambahkan Namespace unik untuk AGP 8.1.0
+              suffix=$(echo $mod | sed 's|/|.|g')
+              # Hapus namespace lama jika ada
+              sed -i '/namespace /d' "$mod/build.gradle"
+              sed -i "/android {/a \    namespace \"com.vmecha.vcore.$suffix\"" "$mod/build.gradle"
+              
+              # 3. Upgrade AGP ke 8.1.0 di tiap file (jika ada deklarasi plugin lokal)
+              sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" "$mod/build.gradle" || true
+            fi
+          done
 
-      - name: Build with JDK 17
+      - name: Build Core Engine
         run: |
-          # Menjalankan build tanpa daemon agar lebih bersih di environment CI
-          ./gradlew :stub:assembleRelease :Bcore:assembleRelease --stacktrace --no-daemon -x lint
+          # Build Bcore akan otomatis memicu build sub-modul (black-fake, dll)
+          ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon -x lint
 
-      - name: Upload Results
+      - name: Upload Repackaged Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vMecha-JDK17-Artifacts
+          name: vMecha-Core-Artifacts
           path: |
-            Bcore/build/outputs/aar/*.aar
-            stub/build/outputs/aar/*.aar
-            stub/build/libs/*.jar
+            **/build/outputs/aar/*.aar
+            **/build/libs/*.jar
