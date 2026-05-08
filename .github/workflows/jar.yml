@@ -1,4 +1,4 @@
-name: Build Framework JAR
+name: Build BlackBox VMecha - Fix Stub & Repackage
 
 on:
   workflow_dispatch:
@@ -6,26 +6,114 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up JDK
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 11
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-        
-      - name: Build Stub/Framework
-        # Biasanya tasknya adalah :stub:assemble atau :core:assemble
-        # Ganti sesuai nama module framework di repo tersebut
-        run: ./gradlew :stub:jar 
+          distribution: temurin
+          java-version: 11 # JDK 11 adalah 'sweet spot' untuk BlackBox & Gradle lama
 
-      - name: Upload Artifact
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Gradle Wrapper
+        run: |
+          rm -rf gradle/wrapper
+          mkdir -p gradle/wrapper
+          wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-all.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+          wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
+          chmod +x gradlew
+
+      - name: Clean Repositories & Fix JCenter
+        run: |
+          find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
+          find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
+
+      - name: Upgrade AGP & Kotlin
+        run: |
+          find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
+          find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
+
+      - name: Rewrite Settings Gradle
+        run: |
+          cat > settings.gradle << 'EOF'
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url 'https://jitpack.io' }
+              }
+          }
+          include ':Bcore', ':stub'
+          EOF
+
+      - name: Full Package Refactor (Safeguarded)
+        run: |
+          OLD_PKG="top.niunaijun.blackbox"
+          NEW_PKG="com.vmecha.vcore"
+          OLD_PATH="top/niunaijun/blackbox"
+          NEW_PATH="com/vmecha/vcore"
+
+          # 1. Ganti string package utama saja, hindari mengganti package 'black.*'
+          # Kita gunakan boundary \b agar tidak memakan kata lain
+          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" -o -name "*.gradle" \) \
+          -exec sed -i "s|\b$OLD_PKG\b|$NEW_PKG|g" {} +
+
+          # 2. Pindahkan folder source (Hanya yang di bawah top/niunaijun/blackbox)
+          find . -type d -path "*/src/main/java/$OLD_PATH" | while read dir; do
+            base=$(echo "$dir" | sed "s|/$OLD_PATH||")
+            mkdir -p "$base/$NEW_PATH"
+            cp -r "$dir/"* "$base/$NEW_PATH/" || true
+            rm -rf "$dir"
+          done
+
+          # 3. Pindahkan folder AIDL
+          find . -type d -path "*/src/main/aidl/$OLD_PATH" | while read dir; do
+            base=$(echo "$dir" | sed "s|/$OLD_PATH||")
+            mkdir -p "$base/$NEW_PATH"
+            cp -r "$dir/"* "$base/$NEW_PATH/" || true
+            rm -rf "$dir"
+          done
+
+      - name: Fix Bcore as Library
+        run: |
+          if [ -d Bcore ]; then
+            sed -i 's/com.android.application/com.android.library/g' Bcore/build.gradle
+            sed -i '/applicationId/d' Bcore/build.gradle
+            # Tambahkan namespace agar R.java ter-generate dengan benar
+            sed -i '/android {/a \    namespace "com.vmecha.vcore"' Bcore/build.gradle
+          fi
+
+      - name: Fix Stub Namespace
+        run: |
+          if [ -d stub ]; then
+            sed -i '/android {/a \    namespace "black.android.os"' stub/build.gradle
+          fi
+
+      - name: Build Stub & Bcore
+        run: |
+          # Build stub dulu sebagai framework dasar
+          ./gradlew :stub:assembleRelease
+          # Build Bcore sebagai library utama
+          ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon -x lint
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: framework-jar
-          path: stub/build/libs/*.jar
-          
+          name: vMecha-Package-Output
+          path: |
+            Bcore/build/outputs/aar/*.aar
+            stub/build/outputs/aar/*.aar
+            stub/build/libs/*.jar
