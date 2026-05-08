@@ -1,66 +1,31 @@
-name: Build VPhoneOS KW
+name: Build Framework JAR
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
     steps:
-    - name: Checkout repo lu
-      uses: actions/checkout@v4
-
-    - name: Setup JDK 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-        cache: 'gradle'
-
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-
-    - name: Download framework.jar dari geterrorcode-me/BlackBox
-      run: |
-        mkdir -p app/libs
-        wget -O app/libs/framework.jar https://raw.githubusercontent.com/geterrorcode-me/BlackBox/master/lib/framework.jar
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
         
-        echo "=== Cek size framework.jar ==="
-        ls -lh app/libs/framework.jar
-        
-        echo "=== Cek isi framework.jar ==="
-        jar tf app/libs/framework.jar | grep -E "black/android|mirror|reflection" | head -15
+      - name: Build Stub/Framework
+        # Biasanya tasknya adalah :stub:assemble atau :core:assemble
+        # Ganti sesuai nama module framework di repo tersebut
+        run: ./gradlew :stub:jar 
 
-    - name: Validasi framework.jar
-      run: |
-        if jar tf app/libs/framework.jar | grep -q "black/android/os/BRUserHandle.class"; then
-          echo "✅ framework.jar valid, ada BRUserHandle"
-        else
-          echo "❌ framework.jar invalid, BRUserHandle ga ketemu"
-          echo "Isi jar:"
-          jar tf app/libs/framework.jar
-          exit 1
-        fi
-
-    - name: Grant gradlew permission
-      run: chmod +x gradlew
-
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace --info
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: VPhoneOS-KW-debug
-        path: app/build/outputs/apk/debug/app-debug.apk
-        retention-days: 7
-
-    - name: Upload framework.jar
-      uses: actions/upload-artifact@v4
-      with:
-        name: framework-jar-used
-        path: app/libs/framework.jar
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-jar
+          path: stub/build/libs/*.jar
+          
