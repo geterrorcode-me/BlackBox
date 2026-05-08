@@ -1,13 +1,14 @@
-name: Build Framework vMecha
+name: Build VPhoneOS KW
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
     - name: Checkout repo lu
@@ -18,23 +19,30 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '17'
+        cache: 'gradle'
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Ambil framework.jar dari BlackBox
+    - name: Download framework.jar dari geterrorcode-me/BlackBox
       run: |
         mkdir -p app/libs
-        wget -O app/libs/framework.jar https://raw.githubusercontent.com/FBlackBox/BlackBox/master/lib/framework.jar
-        echo "=== Isi framework.jar ==="
-        jar tf app/libs/framework.jar | head -20
+        wget -O app/libs/framework.jar https://raw.githubusercontent.com/geterrorcode-me/BlackBox/master/lib/framework.jar
+        
+        echo "=== Cek size framework.jar ==="
+        ls -lh app/libs/framework.jar
+        
+        echo "=== Cek isi framework.jar ==="
+        jar tf app/libs/framework.jar | grep -E "black/android|mirror|reflection" | head -15
 
-    - name: Cek framework.jar bener ga
+    - name: Validasi framework.jar
       run: |
         if jar tf app/libs/framework.jar | grep -q "black/android/os/BRUserHandle.class"; then
-          echo "framework.jar OK, ada BRUserHandle"
+          echo "✅ framework.jar valid, ada BRUserHandle"
         else
-          echo "framework.jar SALAH, ga ada BRUserHandle"
+          echo "❌ framework.jar invalid, BRUserHandle ga ketemu"
+          echo "Isi jar:"
+          jar tf app/libs/framework.jar
           exit 1
         fi
 
@@ -42,16 +50,17 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --stacktrace --info
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: VPhoneOS-KW-debug
         path: app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 7
 
-    - name: Upload framework.jar buat jaga2
+    - name: Upload framework.jar
       uses: actions/upload-artifact@v4
       with:
-        name: framework-jar
+        name: framework-jar-used
         path: app/libs/framework.jar
