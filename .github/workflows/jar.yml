@@ -1,6 +1,8 @@
-name: Build VMecha Framework JAR - Full Repackage
+name: Build Framework vMecha
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -8,142 +10,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v4
+    - name: Checkout repo lu
+      uses: actions/checkout@v4
 
-      - name: Setup JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
+    - name: Setup JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
 
-      - name: Prepare Gradle Wrapper
-        run: |
-          rm -rf gradle/wrapper
-          mkdir -p gradle/wrapper
-          wget -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-all.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOF
-          wget -O gradlew https://github.com/gradle/gradle/raw/v8.0.0/gradlew
-          chmod +x gradlew
+    - name: Ambil framework.jar dari BlackBox
+      run: |
+        mkdir -p app/libs
+        wget -O app/libs/framework.jar https://raw.githubusercontent.com/FBlackBox/BlackBox/master/lib/framework.jar
+        echo "=== Isi framework.jar ==="
+        jar tf app/libs/framework.jar | head -20
 
-      - name: Configure Repositories (Fix 401 & Missing Libs)
-        run: |
-          # Hapus jcenter
-          find . -name "*.gradle" -exec sed -i 's/jcenter()//g' {} +
-          find . -name "*.gradle" -exec sed -i 's/jCenter()//g' {} +
+    - name: Cek framework.jar bener ga
+      run: |
+        if jar tf app/libs/framework.jar | grep -q "black/android/os/BRUserHandle.class"; then
+          echo "framework.jar OK, ada BRUserHandle"
+        else
+          echo "framework.jar SALAH, ga ada BRUserHandle"
+          exit 1
+        fi
 
-          # Rewrite settings.gradle untuk JitPack dan MavenCentral
-          if [ -f settings.gradle ]; then
-            cp settings.gradle settings.gradle.bak
-            cat > settings.gradle << 'EOF'
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-              repositories {
-                  google()
-                  mavenCentral()
-                  maven { url 'https://jitpack.io' }
-                  maven { url 'https://maven.aliyun.com/repository/public' }
-              }
-          }
-          EOF
-            grep "include" settings.gradle.bak >> settings.gradle || true
-          fi
+    - name: Grant gradlew permission
+      run: chmod +x gradlew
 
-      - name: Upgrade Build Tools
-        run: |
-          find . -name "build.gradle" -exec sed -i "s|com.android.tools.build:gradle:[^'\"]*|com.android.tools.build:gradle:8.1.0|g" {} +
-          find . -name "build.gradle" -exec sed -i "s|org.jetbrains.kotlin:kotlin-gradle-plugin:[^'\"]*|org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10|g" {} +
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug --stacktrace
 
-      - name: Full Package & Folder Refactor
-        run: |
-          OLD_PKG="top.niunaijun.blackbox"
-          NEW_PKG="com.vmecha.vcore"
-          OLD_PATH="top/niunaijun/blackbox"
-          NEW_PATH="com/vmecha/vcore"
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: VPhoneOS-KW-debug
+        path: app/build/outputs/apk/debug/app-debug.apk
 
-          # 1. Global String Replace
-          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.aidl" -o -name "*.gradle" -o -name "*.pro" \) \
-          -exec sed -i "s|$OLD_PKG|$NEW_PKG|g" {} +
-
-          # 2. Move Folders (Java, Kotlin, AIDL)
-          for type in java kotlin aidl; do
-            find . -type d -path "*/src/main/$type/$OLD_PATH" | while read dir; do
-              base=$(echo "$dir" | sed "s|/$OLD_PATH||")
-              mkdir -p "$base/$NEW_PATH"
-              cp -r "$dir/"* "$base/$NEW_PATH/" || true
-              rm -rf "$dir"
-            done
-          done
-
-      - name: Fix Manifest & Namespace
-        run: |
-          find . -name "AndroidManifest.xml" | while read manifest; do
-            module_dir=$(dirname $(dirname $(dirname "$manifest")))
-            sed -i 's/package="[^"]*"//g' "$manifest"
-            if [ -f "$module_dir/build.gradle" ]; then
-              sed -i '/namespace /d' "$module_dir/build.gradle"
-              sed -i '/android {/a namespace "com.vmecha.vcore"' "$module_dir/build.gradle"
-            fi
-          done
-
-      - name: Fix AIDL & Resources
-        run: |
-          # Fix AIDL Package Declaration
-          find . -name "*.aidl" | while read aidl; do
-            relative=$(echo "$aidl" | sed -n 's|.*/aidl/||p' | xargs dirname | tr '/' '.')
-            [ -n "$relative" ] && sed -i "s|^package .*|package $relative;|" "$aidl"
-          done
-
-          # Enable AIDL in build.gradle
-          find . -name "build.gradle" -exec sed -i '/android {/a buildFeatures { aidl true }' {} +
-          
-          # Fix CMake Project Name
-          find . -name "CMakeLists.txt" -exec sed -i '/cmake_minimum_required/a project(VMechaNative)' {} +
-
-          # Remove Old R Imports & Add New One
-          find . -type f \( -name "*.java" -o -name "*.kt" \) -exec sed -i '/import top\.niunaijun\.blackbox\.R/d' {} +
-          find Bcore/src/main/java -name "*.java" -exec sed -i '/package /a import com.vmecha.vcore.R;' {} +
-
-      - name: Finalize Bcore as Library
-        run: |
-          if [ -d Bcore ]; then
-            sed -i 's/com.android.application/com.android.library/g' Bcore/build.gradle
-            sed -i '/applicationId/d' Bcore/build.gradle
-          fi
-
-      - name: Build and Export Framework JAR
-        run: |
-          # Build Release
-          ./gradlew :Bcore:assembleRelease --stacktrace --no-daemon -x lint
-
-          # Ekstraksi Framework JAR dari AAR
-          mkdir -p output_framework
-          AAR_FILE=$(find Bcore/build/outputs/aar/ -name "*-release.aar" | head -n 1)
-          if [ -z "$AAR_FILE" ]; then
-            echo "AAR not found!"
-            exit 1
-          fi
-          
-          unzip -j "$AAR_FILE" classes.jar -d output_framework/
-          mv output_framework/classes.jar output_framework/vmecha-framework.jar
-          
-          # Salin Native Libraries (.so) juga sebagai pelengkap
-          mkdir -p output_framework/jniLibs
-          unzip -o "$AAR_FILE" "jni/*" -d output_framework/jni_temp/ || true
-          mv output_framework/jni_temp/jni/* output_framework/jniLibs/ || true
-          rm -rf output_framework/jni_temp
-
-      - name: Upload Framework Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: vmecha-framework-package
-          path: output_framework/
+    - name: Upload framework.jar buat jaga2
+      uses: actions/upload-artifact@v4
+      with:
+        name: framework-jar
+        path: app/libs/framework.jar
